@@ -1,0 +1,15 @@
+$kind: http-request
+name: http://localhost:8080/api/csv-validation/3
+description: ""
+url: http://localhost:8080/api/csv-validation/3
+method: POST
+body:
+  type: json
+  content: "employee_id,name,salary,department\r
+
+    101,John,45000,IT\r
+
+    102,David,abc,HR\r
+
+    103,Alex,55000,Finance"
+order: 1000
