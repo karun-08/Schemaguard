@@ -1,9 +1,11 @@
-
 package com.schemaguard.Service;
 
 import com.schemaguard.dto.CsvValidationResult;
 import com.schemaguard.entity.DataContract;
+import com.schemaguard.entity.ValidationHistory;
+
 import com.schemaguard.repository.DataContractRepository;
+import com.schemaguard.repository.ValidationHistoryRepository;
 
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
@@ -33,13 +35,16 @@ import java.util.Map;
 public class CsvValidationService {
 
     private final DataContractRepository repository;
+    private final ValidationHistoryRepository historyRepository;
     private final JsonMapper jsonMapper;
 
     public CsvValidationService(
             DataContractRepository repository,
+            ValidationHistoryRepository historyRepository,
             JsonMapper jsonMapper) {
 
         this.repository = repository;
+        this.historyRepository = historyRepository;
         this.jsonMapper = jsonMapper;
     }
 
@@ -52,12 +57,14 @@ public class CsvValidationService {
         // 1. Check uploaded file
 
         if (file == null || file.isEmpty()) {
+
             result.getErrors().add("CSV file is empty.");
             result.setValid(false);
+
             return result;
         }
 
-        // 2. Retrieve contract
+        // 2. Retrieve data contract
 
         DataContract contract = repository.findById(contractId)
                 .orElseThrow(() ->
@@ -76,10 +83,15 @@ public class CsvValidationService {
                     );
 
             if (expectedSchema == null || expectedSchema.isEmpty()) {
+
                 result.getErrors().add(
                         "Data contract contains no schema columns."
                 );
+
                 result.setValid(false);
+
+                saveValidationHistory(result, contractId, file);
+
                 return result;
             }
 
@@ -105,10 +117,15 @@ public class CsvValidationService {
                 List<String> headers = parser.getHeaderNames();
 
                 if (headers.isEmpty()) {
+
                     result.getErrors().add(
                             "CSV file does not contain headers."
                     );
+
                     result.setValid(false);
+
+                    saveValidationHistory(result, contractId, file);
+
                     return result;
                 }
 
@@ -156,6 +173,7 @@ public class CsvValidationService {
                                     ));
 
                     if (!exists) {
+
                         result.getUnexpectedColumns().add(actualColumn);
                     }
                 }
@@ -178,6 +196,7 @@ public class CsvValidationService {
                             expectedSchema.entrySet()) {
 
                         String columnName = entry.getKey();
+
                         String expectedType = entry.getValue();
 
                         String actualHeader = actualHeaders.get(
@@ -232,17 +251,55 @@ public class CsvValidationService {
                         && result.getErrors().isEmpty()
         );
 
+        // 10. Save validation history in PostgreSQL
+
+        saveValidationHistory(result, contractId, file);
+
         return result;
     }
 
-    // Normalize column names
+    // 11. Save validation history
+
+    private void saveValidationHistory(
+            CsvValidationResult result,
+            Long contractId,
+            MultipartFile file) {
+
+        ValidationHistory history = new ValidationHistory();
+
+        history.setContractId(contractId);
+
+        history.setFileName(
+                file.getOriginalFilename() != null
+                        ? file.getOriginalFilename()
+                        : "unknown.csv"
+        );
+
+        history.setValid(result.isValid());
+
+        history.setErrors(
+                String.join("\n", result.getErrors())
+        );
+
+        history.setMissingColumns(
+                String.join(", ", result.getMissingColumns())
+        );
+
+        history.setUnexpectedColumns(
+                String.join(", ", result.getUnexpectedColumns())
+        );
+
+        historyRepository.save(history);
+    }
+
+    // 12. Normalize column names
 
     private String normalize(String value) {
 
         return value.trim().toLowerCase(Locale.ROOT);
     }
 
-    // Validate supported data types
+    // 13. Validate supported data types
 
     private boolean isValidType(
             String value,
@@ -275,6 +332,7 @@ public class CsvValidationService {
                 case "REAL":
 
                     double number = Double.parseDouble(value);
+
                     return Double.isFinite(number);
 
                 case "BOOLEAN":
